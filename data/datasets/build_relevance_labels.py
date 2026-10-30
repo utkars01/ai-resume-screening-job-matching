@@ -1,3 +1,4 @@
+import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -19,8 +20,27 @@ print("=" * 70)
 BASE_DIR = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = BASE_DIR / "processed"
 
-INPUT_FILE = PROCESSED_DIR / "ranking_features.csv"
-OUTPUT_FILE = PROCESSED_DIR / "ranking_training_data.csv"
+DEFAULT_INPUT_FILE = PROCESSED_DIR / "ranking_features.csv"
+DEFAULT_OUTPUT_FILE = PROCESSED_DIR / "ranking_training_data.csv"
+
+parser = argparse.ArgumentParser(
+    description="Build heuristic ranking labels from feature rows."
+)
+parser.add_argument(
+    "--input",
+    type=Path,
+    default=DEFAULT_INPUT_FILE,
+    help=f"Feature CSV (default: {DEFAULT_INPUT_FILE})",
+)
+parser.add_argument(
+    "--output",
+    type=Path,
+    default=DEFAULT_OUTPUT_FILE,
+    help=f"Labeled CSV destination (default: {DEFAULT_OUTPUT_FILE})",
+)
+args = parser.parse_args()
+INPUT_FILE = args.input
+OUTPUT_FILE = args.output
 
 
 # ------------------------------------------------------------
@@ -72,14 +92,12 @@ print("\nCalculating structured compatibility score...")
 # excluded from the label calculation.
 
 df["structured_compatibility_score"] = (
-    0.40 * df["required_skill_match_ratio"]
-    + 0.20 * df["preferred_skill_match_ratio"]
-    + 0.15 * df["role_compatibility"]
-    + 0.10 * df["experience_compatibility"]
-    + 0.10 * df["seniority_compatibility"]
-    + 0.05 * df["education_compatibility"]
+    0.50 * df["required_skill_match_ratio"]
+    + 0.1875 * df["role_compatibility"]
+    + 0.125 * df["experience_compatibility"]
+    + 0.125 * df["seniority_compatibility"]
+    + 0.0625 * df["education_compatibility"]
 )
-
 
 # ------------------------------------------------------------
 # Job-relative percentile

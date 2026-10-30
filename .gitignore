@@ -12,6 +12,7 @@ __pycache__/
 # Environment variables
 .env
 .env.*
+!.env.example
 
 # Models
 models/*.pkl
@@ -33,3 +34,97 @@ data/processed/
 # OS
 .DS_Store
 Thumbs.db
+# Uploaded resumes
+data/uploads/
+
+# Dependencies and generated files
+node_modules/
+**/node_modules/
+.pytest_cache/
+**/__pycache__/
+frontend/dist/
+
+# Archives
+*.zip
+*.rar
+*.7z
+
+# Backups
+**/*backup*
+
+# Experimental development artifacts
+data/datasets/*experimental*.py
+data/datasets/*human_review*.py
+data/datasets/audit_education_extraction.py
+data/datasets/evaluate_heuristic_validation.py
+models/*experimental*
+
+# Keep the production model available
+!models/xgboost_ranker.json
+
+# Internal development progress
+PROJECT_PROGRESS.md
+
+# Local diagnostic scripts
+scripts/analyze_resumes.py
+scripts/inspect_dataset.py
+scripts/inspect_datasets.py
+scripts/inspect_compatibility_values.py
+scripts/inspect_experience_extraction.py
+scripts/inspect_experience_inputs.py
+scripts/inspect_job_experience.py
+scripts/inspect_label_bias.py
+scripts/inspect_label_distribution.py
+scripts/inspect_model.py
+scripts/inspect_ranking_data.py
+scripts/inspect_raw_experience.py
+
+# Dataset-only diagnostics
+data/datasets/test_embeddings.py
+data/datasets/test_job_embedding_speed.py
+
+# Local-only applied database schema record
+docs/proposed_recruiter_schema.sql
+
+# Inactive legacy frontend component
+frontend/src/App.jsx
+frontend/src/App.css
+
+# Local-only backend utilities
+backend/create_tables.py
+backend/app/api/database_test.py
+backend/test_document_parser.py
+
+# Unused Vite starter assets
+frontend/src/assets/react.svg
+frontend/src/assets/vite.svg
+
+# Historical frontend backups and inspection archives
+frontend-backup-*/
+frontend-source.zip
+frontend-ui-inspection.zip
+# Local-only test utilities
+/create_test_resumes.py
+/test_bulk_upload.py
+/test_education_extraction.py
+
+# Inactive frontend files and unused assets
+/frontend/src/App.jsx
+/frontend/src/App.backup.jsx
+/frontend/src/App.css.backup*
+/frontend/src/App.jsx.backup
+/frontend/src/index.css.backup*
+/frontend/src/assets/hero.png
+/frontend/src/assets/react.svg
+/frontend/src/assets/vite.svg
+/frontend/public/icons.svg
+
+# Python cache directories
+**/__pycache__/
+
+# Local model evaluation utilities
+/scripts/compare_rankers.py
+/scripts/evaluate_ranker.py
+
+# Local-only database maintenance utility
+/scripts/backfill_applicant_metadata.py

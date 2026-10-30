@@ -1,0 +1,4 @@
+# Replace with the free DNS name assigned to this demo API.
+resume-demo.example.net {
+    reverse_proxy 127.0.0.1:8000
+}

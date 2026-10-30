@@ -1,16 +1,30 @@
+import argparse
 import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import train_test_split
+from backend.app.services.ranking_feature_contract import validate_ranking_labels
 
 # ============================================================
 # CONFIG
 # ============================================================
 
-INPUT_FILE = Path("data/processed/ranking_training_data.csv")
+DEFAULT_INPUT_FILE = Path("data/processed/ranking_training_data.csv")
+DEFAULT_TRAIN_FILE = Path("data/processed/ranking_train.csv")
+DEFAULT_VALIDATION_FILE = Path("data/processed/ranking_validation.csv")
+DEFAULT_SUMMARY_FILE = Path("data/processed/ranking_split_summary.txt")
 
-TRAIN_FILE = Path("data/processed/ranking_train.csv")
-VALIDATION_FILE = Path("data/processed/ranking_validation.csv")
-SUMMARY_FILE = Path("data/processed/ranking_split_summary.txt")
+parser = argparse.ArgumentParser(
+    description="Create a job-grouped ranking train/validation split."
+)
+parser.add_argument("--input", type=Path, default=DEFAULT_INPUT_FILE)
+parser.add_argument("--train-output", type=Path, default=DEFAULT_TRAIN_FILE)
+parser.add_argument("--validation-output", type=Path, default=DEFAULT_VALIDATION_FILE)
+parser.add_argument("--summary-output", type=Path, default=DEFAULT_SUMMARY_FILE)
+args = parser.parse_args()
+INPUT_FILE = args.input
+TRAIN_FILE = args.train_output
+VALIDATION_FILE = args.validation_output
+SUMMARY_FILE = args.summary_output
 
 TEST_SIZE = 0.20
 RANDOM_STATE = 42
@@ -22,6 +36,8 @@ RANDOM_STATE = 42
 print("Loading ranking training data...")
 
 df = pd.read_csv(INPUT_FILE)
+
+validate_ranking_labels(df, "Ranking source dataset")
 
 print(f"Total rows: {len(df):,}")
 print(f"Total jobs: {df['job_id'].nunique():,}")
@@ -70,12 +86,18 @@ if overlap:
         f"Data leakage detected! {len(overlap)} jobs appear in both splits."
     )
 
+validate_ranking_labels(train_df, "Training split")
+validate_ranking_labels(validation_df, "Validation split")
+
 print(f"Job overlap: {len(overlap)}")
 
 # ============================================================
 # SAVE
 # ============================================================
 
+TRAIN_FILE.parent.mkdir(parents=True, exist_ok=True)
+VALIDATION_FILE.parent.mkdir(parents=True, exist_ok=True)
+SUMMARY_FILE.parent.mkdir(parents=True, exist_ok=True)
 train_df.to_csv(TRAIN_FILE, index=False)
 validation_df.to_csv(VALIDATION_FILE, index=False)
 

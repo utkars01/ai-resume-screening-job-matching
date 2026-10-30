@@ -1,0 +1,22 @@
+[Unit]
+Description=AI Resume Screening demo API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=resumeapp
+Group=resumeapp
+WorkingDirectory=/opt/ai-resume-screening/release
+EnvironmentFile=/etc/ai-resume-screening/demo.env
+ExecStart=/opt/ai-resume-screening/venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1 --log-level info
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ai-resume-screening/uploads
+
+[Install]
+WantedBy=multi-user.target

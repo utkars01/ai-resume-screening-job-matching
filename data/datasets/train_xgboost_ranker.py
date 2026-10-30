@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 import xgboost as xgb
 from pathlib import Path
+from backend.app.services.ranking_feature_contract import (
+    MODEL_FEATURE_NAMES,
+    validate_ranking_labels,
+)
 
 # ============================================================
 # CONFIG
@@ -22,6 +26,14 @@ print("Loading training data...")
 train_df = pd.read_csv(TRAIN_FILE)
 validation_df = pd.read_csv(VALIDATION_FILE)
 
+validate_ranking_labels(train_df, "Training split")
+validate_ranking_labels(validation_df, "Validation split")
+
+# XGBoost ranking group sizes describe consecutive row ranges. Sort both
+# datasets by query ID so rows from one job always occupy one range.
+train_df = train_df.sort_values("job_id", kind="stable").reset_index(drop=True)
+validation_df = validation_df.sort_values("job_id", kind="stable").reset_index(drop=True)
+
 print(f"Training rows: {len(train_df):,}")
 print(f"Validation rows: {len(validation_df):,}")
 
@@ -29,17 +41,15 @@ print(f"Validation rows: {len(validation_df):,}")
 # FEATURES
 # ============================================================
 
-DROP_COLUMNS = [
-    "job_id",
-    "resume_id",
-    "relevance_label",
-    "rank_score_normalized"
-]
-
-FEATURE_COLUMNS = [
-    col for col in train_df.columns
-    if col not in DROP_COLUMNS
-]
+FEATURE_COLUMNS = list(MODEL_FEATURE_NAMES)
+missing_train = set(FEATURE_COLUMNS) - set(train_df.columns)
+missing_validation = set(FEATURE_COLUMNS) - set(validation_df.columns)
+if missing_train or missing_validation:
+    raise ValueError(
+        "Ranking split feature schema mismatch: "
+        f"training missing={sorted(missing_train)}, "
+        f"validation missing={sorted(missing_validation)}"
+    )
 
 print("\nFeatures used:")
 for feature in FEATURE_COLUMNS:
