@@ -1,21 +1,22 @@
+# ─────────────────────────────────────────────────────────────
+# Render Blueprint — Backend API only (free tier)
+# Frontend → Vercel  |  Database → Neon (external)
+# ─────────────────────────────────────────────────────────────
 services:
   - type: web
-    name: ai-resume-screening
-    runtime: docker
-    plan: standard
+    name: ai-resume-backend
+    runtime: python
+    plan: free
     region: oregon
-    dockerfilePath: Dockerfile
-    disk:
-      name: resume-uploads
-      mountPath: /app/data/uploads
-      sizeGB: 10
+    rootDir: .
+    buildCommand: pip install -r requirements.txt
+    startCommand: sh scripts/entrypoint.sh
+    healthCheckPath: /health
     envVars:
       - key: DEBUG
         value: "false"
       - key: DATABASE_URL
-        fromDatabase:
-          name: resume-screening-db
-          property: connectionString
+        sync: false          # Paste your Neon connection string in Render dashboard
       - key: AUTH_SECRET
         generateValue: true
       - key: AUTH_COOKIE_SECURE
@@ -23,13 +24,12 @@ services:
       - key: AUTH_TOKEN_TTL_MINUTES
         value: "720"
       - key: UPLOAD_STORAGE_DIR
-        value: "/app/data/uploads"
+        value: "/tmp/uploads"
       - key: EMBEDDING_LOCAL_FILES_ONLY
         value: "true"
       - key: HF_HOME
-        value: "/app/hf-cache"
-
-databases:
-  - name: resume-screening-db
-    plan: standard
-    region: oregon
+        value: "/tmp/hf-cache"
+      - key: SERVE_FRONTEND
+        value: "false"
+      - key: CORS_ORIGINS
+        sync: false          # Paste your Vercel frontend URL here, e.g. https://my-app.vercel.app

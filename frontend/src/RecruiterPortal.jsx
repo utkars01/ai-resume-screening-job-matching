@@ -6,8 +6,10 @@ import {
 } from 'lucide-react'
 import './App.css'
 
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+
 const api = async (path, options = {}) => {
-  const response = await fetch(path, { credentials: 'same-origin', ...options })
+  const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', ...options })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
     const error = new Error(body.detail || `Request failed (${response.status})`)
