@@ -246,3 +246,50 @@ This repository contains deployment preparation scripts, runtime dependency lock
 Local validation does not establish that a remote deployment is operational.
 
 No public deployment or hosting-provider configuration should be considered complete until the deployment checklist has been verified and the project owner has explicitly approved deployment.
+
+## 13. Ready-to-Deploy Quickstart Options
+
+### Option A: 1-Command Local or VPS Deployment (Docker Compose)
+
+The repository provides a complete multi-stage `Dockerfile` and `docker-compose.yml` defining the PostgreSQL database with healthchecks, persistent volumes, automated migrations, and the FastAPI application pre-caching the offline sentence transformer model.
+
+```bash
+# Clone the repository
+git clone https://github.com/utkars01/ai-resume-screening-job-matching.git
+cd ai-resume-screening-job-matching
+
+# Launch database and web application
+docker compose up --build -d
+```
+
+- Access web interface at: `http://localhost:8000`
+- API documentation at: `http://localhost:8000/docs`
+- Database runs on port 5432 with persistent volume `postgres_data`.
+- Uploaded resumes persist in `resume_uploads`.
+
+### Option B: Render 1-Click Deployment (render.yaml)
+
+The repository includes a production `render.yaml` Blueprint defining both the web service and managed PostgreSQL database:
+
+1. Push your repository to GitHub.
+2. Log in to [Render](https://render.com) and go to **Blueprints**.
+3. Connect your repository and select `render.yaml`.
+4. Click **Apply**. Render will automatically provision:
+   - A managed PostgreSQL database.
+   - A containerized web service with persistent disk for resume uploads.
+   - Automatically injected `DATABASE_URL` and auto-generated `AUTH_SECRET`.
+
+### Option C: Railway Deployment (railway.json)
+
+1. Connect your GitHub repository to [Railway](https://railway.app).
+2. Add a **PostgreSQL** database service in your Railway project canvas.
+3. Railway will detect `railway.json` and build using the root `Dockerfile`.
+4. Connect the database by setting `DATABASE_URL=${{Postgres.DATABASE_URL}}` in service variables.
+5. Provide a strong `AUTH_SECRET` (32+ chars) and deploy.
+
+### Option D: Decoupled Vercel (Frontend) + Cloud Backend
+
+If you prefer hosting the React frontend on Vercel:
+1. Deploy `frontend/` to Vercel.
+2. In Vercel Project Settings, copy `deployment/free-demo/vercel.json.template` to `vercel.json` and update the backend rewrite destination to your backend's public domain.
+3. Alternatively, set `CORS_ORIGINS=https://your-vercel-app.vercel.app` on your backend service.

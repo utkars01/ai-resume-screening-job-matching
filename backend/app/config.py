@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     upload_storage_dir: Path = Path("data/uploads")
     embedding_model_revision: str = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
     embedding_local_files_only: bool = True
+    cors_origins: str = ""
+    serve_frontend: bool = True
 
     @model_validator(mode="after")
     def validate_production_security(self):

@@ -678,8 +678,25 @@ function RankedApplicants({ rows, shortlistedIds, busy, onShortlist }) {
         </div>
       </div>
       <div className="ranked-score">
-        <strong>{Number.isFinite(Number(row.ranking_score)) ? Number(row.ranking_score).toFixed(3) : '?'}</strong>
-        <span>Raw model score</span>
+        {row.composite_score != null && (
+          <div className="fit-badge-container">
+            <span className="fit-percentage">{row.composite_score}% Fit</span>
+            <span className={`fit-tier-pill tier-${(row.match_tier || '').toLowerCase().replace(/\s+/g, '-')}`}>
+              {row.match_tier}
+            </span>
+            {coverage != null && (
+              <span className="required-skill-pill">
+                Core Skills: {Math.round(coverage * 100)}%
+              </span>
+            )}
+          </div>
+        )}
+        {row.ranking_reason && (
+          <div className="ranking-reason">
+            <span className="ranking-reason-label">Why this rank</span>
+            <span>{row.ranking_reason}</span>
+          </div>
+        )}
         <button className="secondary-button" disabled={busy || shortlistedIds.has(row.applicant_id)} onClick={() => onShortlist(row)}>{shortlistedIds.has(row.applicant_id) ? 'Shortlisted' : 'Add to shortlist'}</button>
       </div>
     </article>

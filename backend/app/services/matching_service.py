@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import xgboost as xgb
+from threading import Lock
 
 from backend.app.models.candidate import Candidate
 from backend.app.models.job import Job
@@ -59,19 +59,6 @@ def cosine_similarity(embedding_a, embedding_b) -> float:
 
 class MatchingService:
     def __init__(self):
-        if not MODEL_PATH.exists():
-            raise FileNotFoundError(
-                f"XGBoost model not found: {MODEL_PATH}"
-            )
-
-        if not FEATURE_PATH.exists():
-            raise FileNotFoundError(
-                f"Ranking feature file not found: {FEATURE_PATH}"
-            )
-
-        self.model = xgb.Booster()
-        self.model.load_model(str(MODEL_PATH))
-
         self.feature_columns = [
             line.strip()
             for line in FEATURE_PATH.read_text(
@@ -86,6 +73,24 @@ class MatchingService:
                 "production training contract in ranking_feature_contract.py."
             )
 
+        self._model = None
+        self._model_lock = Lock()
+
+    def _get_model(self):
+        if self._model is None:
+            with self._model_lock:
+                if self._model is None:
+                    if not MODEL_PATH.exists():
+                        raise FileNotFoundError(
+                            f"XGBoost model not found: {MODEL_PATH}"
+                        )
+                    import xgboost as xgb
+
+                    model = xgb.Booster()
+                    model.load_model(str(MODEL_PATH))
+                    self._model = model
+        return self._model
+
     def calculate_features(
         self,
         candidate: Candidate,
@@ -93,20 +98,44 @@ class MatchingService:
         resume_profile: ResumeAIProfile,
         job: Job,
         job_profile: JobAIProfile,
+        job_embedding: list[float] | None = None,
     ) -> dict:
-        resume_text = resume.extracted_text or ""
-        job_text_parts = [
-            job.title or "",
-            job.description or "",
-            job.required_skills or "",
-            job.preferred_skills or "",
-        ]
-        job_text = "\n".join(
-            part.strip() for part in job_text_parts if part and part.strip()
-        )
+        # Prioritize key qualification signals (role, seniority, experience, top skills)
+        # at the start of the semantic text so Sentence Transformers' 256-token limit
+        # focuses on relevant qualifications rather than personal headers or boilerplate.
+        semantic_resume_parts = []
+        if getattr(candidate, "role", None):
+            semantic_resume_parts.append(f"Role: {candidate.role}")
+        if getattr(candidate, "seniority", None):
+            semantic_resume_parts.append(f"Seniority: {candidate.seniority}")
+        if getattr(candidate, "years_experience", None) is not None:
+            semantic_resume_parts.append(f"Experience: {candidate.years_experience} years")
+        extracted_skills = getattr(resume_profile, "extracted_skills", None) or []
+        if extracted_skills:
+            semantic_resume_parts.append(f"Skills: {', '.join(extracted_skills[:25])}")
+        if getattr(candidate, "education", None):
+            semantic_resume_parts.append(f"Education: {candidate.education}")
+
+        raw_resume_text = (getattr(resume, "extracted_text", None) or "").strip()
+        if raw_resume_text:
+            semantic_resume_parts.append(raw_resume_text)
+
+        resume_text = "\n".join(semantic_resume_parts) if semantic_resume_parts else (raw_resume_text or "Candidate")
+
+        if job_embedding is None:
+            job_text_parts = [
+                f"Title: {job.title}" if getattr(job, "title", None) else "",
+                f"Required Skills: {job.required_skills}" if getattr(job, "required_skills", None) else "",
+                f"Preferred Skills: {job.preferred_skills}" if getattr(job, "preferred_skills", None) else "",
+                f"Experience: {job.experience_required} years" if getattr(job, "experience_required", None) is not None else "",
+                getattr(job, "description", None) or "",
+            ]
+            job_text = "\n".join(
+                part.strip() for part in job_text_parts if part and part.strip()
+            )
+            job_embedding = embedding_service.generate_embedding(job_text)
 
         resume_embedding = embedding_service.generate_embedding(resume_text)
-        job_embedding = embedding_service.generate_embedding(job_text)
         semantic_similarity = cosine_similarity(resume_embedding, job_embedding)
 
         return build_ranking_feature_components(
@@ -123,6 +152,121 @@ class MatchingService:
             resume_education=candidate.education,
             job_education=job.education_required,
         )
+
+    @staticmethod
+    def calculate_calibrated_fit(
+        raw_score: float,
+        features: dict,
+        required_skills: list | None = None,
+        matched_required: list | None = None,
+        preferred_skills: list | None = None,
+        matched_preferred: list | None = None,
+        semantic_similarity: float | None = None,
+    ) -> dict:
+        """
+        Calculate a Required-Skill-Dominant candidate evaluation score (0-100%) and tier.
+
+        Required Skills are treated as the primary gatekeeper and dominant ranking factor:
+        - Required Skills Match: 55% of the primary score.
+        - ML Ranking Model Signal: 15% (sigmoid-scaled XGBoost non-linear interactions).
+        - Semantic Content Relevance: 15% (Sentence Transformers cosine similarity).
+        - Profile Compatibility: 15% (Role, Experience, Seniority, Education).
+        - Preferred Skills Bonus: Up to +5% additive differentiator / tie-breaker.
+
+        Strict Guardrails for Required Skills:
+        - 0% Required Skills Match: Hard ceiling cap at max 30.0% fit, preventing unqualified
+          candidates from ranking high regardless of semantic buzzwords or model spikes.
+        - < 50% Required Skills Match: Strict 25% penalty on composite score.
+        - 100% Required Skills Match: 5% reward boost for complete core coverage.
+        """
+        import math
+
+        req_count = len(required_skills or [])
+        matched_count = len(matched_required or [])
+
+        # 1. Primary Dominant Component: Required Skills Match (0.0 to 1.0)
+        if req_count > 0:
+            required_skill_ratio = matched_count / req_count
+        else:
+            resume_skills_count = features.get("resume_skill_count", 0)
+            required_skill_ratio = min(1.0, resume_skills_count / 5.0)
+
+        # 2. ML Ranker Signal (sigmoid scaled into [0.0, 1.0])
+        clamped_score = max(-5.0, min(5.0, float(raw_score)))
+        ml_score = 1.0 / (1.0 + math.exp(-2.0 * clamped_score))
+
+        # 3. Semantic Similarity (Sentence Transformers)
+        if semantic_similarity is None:
+            semantic_similarity = features.get("semantic_similarity", 0.5)
+        semantic_sim = max(0.0, min(1.0, float(semantic_similarity)))
+
+        # 4. Profile Compatibility (Role, Experience, Seniority, Education)
+        role_comp = float(features.get("role_compatibility", 0.5))
+        exp_comp = float(features.get("experience_compatibility", 0.5))
+        sen_comp = float(features.get("seniority_compatibility", 0.5))
+        edu_comp = float(features.get("education_compatibility", 0.5))
+        profile_score = (0.35 * role_comp) + (0.35 * exp_comp) + (0.15 * sen_comp) + (0.15 * edu_comp)
+
+        # 5. Preferred Skills Differentiator (Up to +5% additive bonus)
+        pref_count = len(preferred_skills or [])
+        matched_pref_count = len(matched_preferred or [])
+        pref_bonus = 0.05 * (matched_pref_count / pref_count) if pref_count > 0 else 0.0
+
+        # 6. Dominant Required-Skills Weighting:
+        # When required skills are present, they drive 55% of the overall composite score
+        if req_count > 0:
+            base_composite = (
+                (0.55 * required_skill_ratio)
+                + (0.15 * ml_score)
+                + (0.15 * semantic_sim)
+                + (0.15 * profile_score)
+                + pref_bonus
+            )
+
+            # Strict Required Skill Guardrails:
+            if matched_count == 0:
+                # Disqualifying ceiling: Cannot score above 30.0% if missing ALL required skills
+                base_composite = min(0.30, base_composite * 0.40)
+            elif required_skill_ratio < 0.5:
+                # Heavy penalty if candidate matches less than half of core required skills
+                base_composite *= 0.75
+            elif required_skill_ratio == 1.0:
+                # Core mastery reward
+                base_composite = min(1.0, base_composite * 1.05)
+        else:
+            # Fallback when job description did not specify explicit required skills
+            base_composite = (
+                (0.35 * required_skill_ratio)
+                + (0.25 * ml_score)
+                + (0.20 * semantic_sim)
+                + (0.20 * profile_score)
+                + pref_bonus
+            )
+
+        composite_score = round(max(0.0, min(100.0, base_composite * 100.0)), 1)
+
+        # 7. Categorical match tier
+        if composite_score >= 80.0:
+            fit_tier = "Strong Match"
+        elif composite_score >= 65.0:
+            fit_tier = "Good Match"
+        elif composite_score >= 50.0:
+            fit_tier = "Moderate Match"
+        else:
+            fit_tier = "Low Match"
+
+        return {
+            "composite_score": composite_score,
+            "fit_tier": fit_tier,
+            "required_skill_ratio": round(required_skill_ratio * 100.0, 1),
+            "score_breakdown": {
+                "required_skill_pct": round(required_skill_ratio * 100.0, 1),
+                "semantic_pct": round(semantic_sim * 100.0, 1),
+                "profile_pct": round(profile_score * 100.0, 1),
+                "model_signal_pct": round(ml_score * 100.0, 1),
+                "preferred_bonus_pct": round(pref_bonus * 100.0, 1),
+            },
+        }
 
     def predict_score(self, features: dict) -> float:
         missing_features = [
@@ -151,10 +295,12 @@ class MatchingService:
                 "Ranking features contain non-finite values."
             )
 
+        import xgboost as xgb
+
         matrix = xgb.DMatrix(feature_frame)
 
         # This is a raw XGBoost ranking score, NOT a probability.
-        return float(self.model.predict(matrix)[0])
+        return float(self._get_model().predict(matrix)[0])
 
 
 matching_service = MatchingService()

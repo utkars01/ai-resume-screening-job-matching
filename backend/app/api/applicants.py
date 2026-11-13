@@ -28,6 +28,76 @@ from backend.app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _build_ranking_reason(result: dict, rank: int, all_results: list) -> str:
+    """Generate a plain-English explanation of why this candidate is ranked here."""
+    reasons: list[str] = []
+
+    req_pct = round(result.get("skill_coverage", 0) * 100)
+    matched = result.get("matched_skills") or []
+    missing = result.get("missing_skills") or []
+    total_req = len(matched) + len(missing)
+    role_comp = result.get("role_compatibility") or 0
+    exp_comp = result.get("experience_compatibility") or 0
+    composite = result.get("composite_score") or 0
+    match_tier = result.get("match_tier") or ""
+
+    # --- Primary driver: required skill coverage ---
+    if total_req == 0:
+        reasons.append("No required skills listed for comparison")
+    elif req_pct == 100:
+        reasons.append(f"Matches all {len(matched)} required skill{'s' if len(matched) != 1 else ''}")
+    elif req_pct >= 75:
+        reasons.append(
+            f"Strong required skill coverage — {req_pct}% ({len(matched)} of {total_req} skills matched)"
+        )
+    elif req_pct >= 50:
+        reasons.append(
+            f"Adequate required skill coverage — {req_pct}% ({len(matched)} of {total_req} skills matched)"
+        )
+    else:
+        reasons.append(
+            f"Low required skill coverage — only {req_pct}% ({len(missing)} of {total_req} core skills missing)"
+        )
+
+    # --- Secondary signals ---
+    if role_comp >= 0.80:
+        reasons.append("strong role alignment")
+    elif role_comp >= 0.60:
+        reasons.append("moderate role alignment")
+
+    if exp_comp >= 0.80:
+        reasons.append("meets experience requirements")
+    elif exp_comp < 0.40:
+        reasons.append("below experience requirement")
+
+    if match_tier in ("Strong Match", "Good Match"):
+        reasons.append(f"overall {match_tier.lower()}")
+
+    # --- Peer comparison (ranks 2+) ---
+    if rank > 1 and len(all_results) > 1:
+        above = all_results[rank - 2]  # zero-indexed entry ranked just above
+        above_req_pct = round(above.get("skill_coverage", 0) * 100)
+        above_composite = above.get("composite_score") or 0
+
+        if req_pct > above_req_pct:
+            reasons.append(
+                f"ranked above #{rank - 1} due to higher required skill coverage "
+                f"({req_pct}% vs {above_req_pct}%)"
+            )
+        elif req_pct < above_req_pct:
+            reasons.append(
+                f"ranked below #{rank - 1} who covers {above_req_pct}% of required skills "
+                f"vs this candidate's {req_pct}%"
+            )
+        elif composite >= above_composite - 0.5:
+            reasons.append(
+                f"comparable overall fit to #{rank - 1} — role and experience signals "
+                "differentiate the final order"
+            )
+
+    return (reasons[0].capitalize() + ("; " + "; ".join(reasons[1:]) if len(reasons) > 1 else "") + ".")
+
 router = APIRouter(
     prefix="/api/applicants",
     tags=["Applicants"],
@@ -428,6 +498,22 @@ def rank_applicants(
     results = []
     skipped = []
 
+    # Pre-generate job embedding once for the batch to eliminate redundant inference
+    job_embedding = None
+    try:
+        job_text_parts = [
+            f"Title: {job.title}" if getattr(job, "title", None) else "",
+            f"Required Skills: {job.required_skills}" if getattr(job, "required_skills", None) else "",
+            f"Preferred Skills: {job.preferred_skills}" if getattr(job, "preferred_skills", None) else "",
+            f"Experience: {job.experience_required} years" if getattr(job, "experience_required", None) is not None else "",
+            getattr(job, "description", None) or "",
+        ]
+        job_text = "\n".join(part.strip() for part in job_text_parts if part and part.strip())
+        if job_text.strip():
+            job_embedding = embedding_service.generate_embedding(job_text)
+    except Exception:
+        logger.warning("Could not pre-generate batch job embedding; falling back to per-applicant embedding.")
+
     # 4. Calculate features and predict ranking scores.
     for applicant in applicants:
         profile = (
@@ -455,6 +541,7 @@ def rank_applicants(
                 resume_profile=profile,
                 job=job,
                 job_profile=job_profile,
+                job_embedding=job_embedding,
             )
 
             score = matching_service.predict_score(
@@ -462,6 +549,17 @@ def rank_applicants(
             )
 
             features = calculated["features"]
+
+            # Compute balanced calibrated fit to smooth out raw XGBoost margin spikes
+            calibrated = matching_service.calculate_calibrated_fit(
+                raw_score=score,
+                features=features,
+                required_skills=getattr(job_profile, "required_skills", None),
+                matched_required=calculated.get("matched_skills"),
+                preferred_skills=getattr(job_profile, "preferred_skills", None),
+                matched_preferred=calculated.get("matched_preferred_skills"),
+                semantic_similarity=calculated.get("semantic_similarity"),
+            )
 
             results.append(
                 {
@@ -472,6 +570,9 @@ def rank_applicants(
                     "seniority": applicant.seniority,
                     "education": applicant.education,
                     "ranking_score": score,
+                    "composite_score": calibrated["composite_score"],
+                    "match_tier": calibrated["fit_tier"],
+                    "score_breakdown": calibrated["score_breakdown"],
                     "semantic_similarity": calculated[
                         "semantic_similarity"
                     ],
@@ -517,14 +618,22 @@ def rank_applicants(
                 }
             )
 
-    # 5. Higher model scores rank first.
+    # 5. Rank candidates dominantly based on Required Skill fulfillment and composite fit.
+    # Primary sort: composite_score (55%+ driven by required skills with strict guardrails)
+    # Secondary sort: direct required skill coverage percentage (skill_coverage)
+    # Tertiary sort: raw XGBoost ranking_score
     results.sort(
-        key=lambda item: item["ranking_score"],
+        key=lambda item: (
+            item.get("composite_score", 0.0),
+            item.get("skill_coverage", 0.0),
+            item["ranking_score"],
+        ),
         reverse=True,
     )
 
     for rank, result in enumerate(results, start=1):
         result["rank"] = rank
+        result["ranking_reason"] = _build_ranking_reason(result, rank, results)
 
     try:
         run_id = db.execute(
@@ -541,6 +650,9 @@ def rank_applicants(
             "years_experience",
             "seniority",
             "education",
+            "composite_score",
+            "match_tier",
+            "score_breakdown",
             "semantic_similarity",
             "skill_coverage",
             "baseline_score",
@@ -553,6 +665,7 @@ def rank_applicants(
             "experience_compatibility",
             "seniority_compatibility",
             "education_compatibility",
+            "ranking_reason",
         )
         insert_result = text(
             "INSERT INTO screening_results "

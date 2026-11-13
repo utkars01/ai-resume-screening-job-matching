@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: resume_screening_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: resumeuser
+      POSTGRES_PASSWORD: resumepassword
+      POSTGRES_DB: resume_matching
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resumeuser -d resume_matching"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: resume_screening_web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=true
+      - DATABASE_URL=postgresql+psycopg://resumeuser:resumepassword@db:5432/resume_matching
+      - AUTH_SECRET=development-secret-key-at-least-32-bytes-long-change-in-prod
+      - AUTH_COOKIE_SECURE=false
+      - AUTH_TOKEN_TTL_MINUTES=720
+      - UPLOAD_STORAGE_DIR=/app/data/uploads
+      - EMBEDDING_LOCAL_FILES_ONLY=true
+      - HF_HOME=/app/hf-cache
+    volumes:
+      - resume_uploads:/app/data/uploads
+
+volumes:
+  postgres_data:
+  resume_uploads:

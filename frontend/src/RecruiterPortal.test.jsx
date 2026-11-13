@@ -66,6 +66,7 @@ function makeApi({ authenticated = true, jobs = [job], applicants = [], loginRes
         education: 'M.S. Computer Science',
         rank: 1,
         ranking_score: 0.93,
+        ranking_reason: 'Strong required skill coverage — 75% (1 of 2 skills matched); meets experience requirements.',
         skill_coverage: 0.75,
         matched_skills: ['Python'],
         missing_skills: ['Spark'],
@@ -219,7 +220,8 @@ describe('recruiter portal workflows', () => {
 
     const candidate = await screen.findByRole('article')
     expect(within(candidate).getByText('alex.pdf')).toBeInTheDocument()
-    expect(within(candidate).getByText('0.930')).toBeInTheDocument()
+    expect(within(candidate).getByText('Why this rank')).toBeInTheDocument()
+    expect(within(candidate).getByText('Strong required skill coverage — 75% (1 of 2 skills matched); meets experience requirements.')).toBeInTheDocument()
     expect(within(candidate).getByText('Matched: Python')).toBeInTheDocument()
     expect(within(candidate).getByText('Missing: Spark')).toBeInTheDocument()
     expect(within(candidate).getByText('Required skill coverage')).toBeInTheDocument()

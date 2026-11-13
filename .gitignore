@@ -88,7 +88,7 @@ docs/proposed_recruiter_schema.sql
 
 # Inactive legacy frontend component
 frontend/src/App.jsx
-frontend/src/App.css
+
 
 # Local-only backend utilities
 backend/create_tables.py

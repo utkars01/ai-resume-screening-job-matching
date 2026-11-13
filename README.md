@@ -124,6 +124,20 @@ git clone https://github.com/utkars01/ai-resume-screening-job-matching.git
 cd ai-resume-screening-job-matching
 ```
 
+### Quick Start with Docker (Recommended)
+
+To run the full stack (PostgreSQL, FastAPI backend, ML models, React UI) in one command:
+
+```bash
+docker compose up --build
+```
+
+Open `http://localhost:8000` to access the recruiter portal.
+
+---
+
+### Manual Local Development Setup
+
 ### 2. Set up the Python environment
 
 Windows PowerShell:
